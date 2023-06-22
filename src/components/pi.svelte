@@ -1,19 +1,17 @@
 <script lang='ts'>
 
 import * as THREE from 'three'
-import { Group } from 'three'
-import { T, type Props, type Events, type Slots, forwardEventHandlers, useFrame } from '@threlte/core'
+import { T, type Props, type Events, type Slots, forwardEventHandlers, useFrame, useThrelte } from '@threlte/core'
 import { useGltf, HTML } from '@threlte/extras'
 import { Edges, interactivity } from '@threlte/extras'
-import config from '../../tailwind.config'
-
-const theme = config.theme
+import { onDestroy, onMount } from 'svelte'
+import { view } from '../stores'
 
 type $$Props = Props<THREE.Group>
 type $$Events = Events<THREE.Group>
 type $$Slots = Slots<THREE.Group> & { fallback: {}; error: { error: any } }
 
-export const ref = new Group()
+export const ref = new THREE.Group()
 
 type GLTFResult = {
   nodes: {
@@ -133,30 +131,56 @@ const component = forwardEventHandlers()
 const targetPosition = new THREE.Vector3()
 const hoverObject = new THREE.Object3D()
 
-let hoveredPin = ''
-let selected: THREE.Mesh
+let selectedPinName = ''
+let selected: THREE.Mesh | null = null
 
-const handleEnter = (event) => {
-  if (event.object.name === '') {
-    console.log(event.object.name, event.object)
-  }
+const assignments: Record<string, string> = {}
 
+const formatPinName = (name: string) => {
+  return name.replace('_', ' ').replace('_', ' / ')
+}
 
+const handleAssignment = (event: CustomEvent<{ value: string }>) => {
+  assignments[selectedPinName] = event.detail.value
+}
+
+const COLOR_WHITE = new THREE.Color(0xffffff)
+const COLOR_GREEN = new THREE.Color(0x42d46b)
+
+const handleEnter = (event: THREE.Intersection) => {
   if (selected) {
     const material = selected.material as THREE.MeshStandardMaterial
-    material.color.set(0xffffff)
+    material.color.set(COLOR_WHITE)
   }
 
   selected = event.object as THREE.Mesh
-  hoveredPin = selected.name.replace('_', ' ').replace('_', '/')
+  selectedPinName = formatPinName(selected.name)
   targetPosition.copy(selected.position)
 
   const material = selected.material as THREE.MeshStandardMaterial
-  material.color.set(0x42d46b)
+  material.color.set(COLOR_GREEN)
 }
 
-useFrame((_, delta) => {
+const handleLeave = () => {
+  if (selected) {
+    const material = selected.material as THREE.MeshStandardMaterial
+    material.color.set(COLOR_WHITE)
+    selected = null
+  }
+}
+
+useFrame(() => {
   hoverObject.position.lerp(targetPosition, 0.4)
+})
+
+const { renderer } = useThrelte()
+
+onMount(() => {
+  renderer?.domElement.parentElement?.addEventListener('pointerleave', handleLeave)
+})
+
+onDestroy(() => {
+  renderer?.domElement.parentElement?.removeEventListener('pointerleave', handleLeave)
 })
 
 </script>
@@ -169,7 +193,7 @@ useFrame((_, delta) => {
     {#each meshes as mesh (mesh)}
       <T is={gltf.nodes[mesh]}>
         <T.MeshBasicMaterial
-          color='white'
+          color={COLOR_WHITE}
           toneMapped={false}
         />
         <Edges
@@ -185,23 +209,49 @@ useFrame((_, delta) => {
         on:pointerover={handleEnter}
       >
         <T.MeshBasicMaterial
-          color='white'
+          color={assignments[formatPinName(pin)] ? COLOR_GREEN : COLOR_WHITE}
           toneMapped={false}
         />
         <Edges
           thresholdAngle={20}
           color='black'
         />
+
+        {#if assignments[formatPinName(pin)]}
+          <HTML center sprite>
+            <div
+              class='absolute -translate-x-[50%] translate-y-[23px] transition-opacity duration-300'
+              class:opacity-0={$view === 'topdown'}
+              class:opacity-100={$view === 'isometric'}
+            >
+              <div class='flex flex-col gap-2 bg-white py-1 px-2 min-w-max shadow-sm border border-black text-xs'>
+                <h3 class='font-semibold'>{formatPinName(pin)}</h3>
+                {assignments[formatPinName(pin)]}
+                <div class='absolute bottom-full left-[50%] bg-black w-px bg-success h-6' />
+              </div>
+            </div>
+          </HTML>
+        {/if}
       </T>
     {/each}
     
 
     <T is={hoverObject}>
-      <HTML center>
-        {#if hoveredPin}
-          <div class='relative bg-white py-2 px-3 -mt-[5.5rem] min-w-max shadow-sm border border-medium'>
-            {hoveredPin}
-            <div class='absolute top-full left-[50%] w-px bg-gray-400 h-6' />
+      <HTML center sprite>
+        {#if selected}
+          <div class='absolute -translate-x-[50%] translate-y-[23px]'>
+            <div class='flex flex-col gap-2 bg-white py-2 px-3 min-w-max shadow-sm border border-medium text-xs'>
+              <h3 class='font-semibold'>{selectedPinName}</h3>
+              <div class='flex flex-col gap-2'>
+                <v-radio
+                  label='Assignment'
+                  options='Direction,In1,In2,PWM,High,Low'
+                  on:input={handleAssignment}
+                />
+              </div>
+              <div class='absolute bottom-full left-[50%] w-px bg-gray-400 h-6' />
+            </div>
+            
           </div>
         {/if}
       </HTML>
